@@ -7,7 +7,7 @@ import os
 import talib as ta
 from tqdm import tqdm
 import json
-from datetime import datetime
+from datetime import datetime,timedelta
 from multiprocessing import Pool,cpu_count
 import multiprocessing
 
@@ -20,15 +20,13 @@ if not os.path.exists(RES_PATH):
 END_0 = time(15,0)
 END_1 = time(23,0)
 
-def get_data(path,start=20000,end=50000,period=1):
-    data = pd.read_csv(path)
-    return data[start:end]
 
 def backtest(args,is_fitting = True):
 
     data = args[0]
     result = args[1]
-    benifit = args[2]
+    l_benifit = args[2]
+    s_benifit = args[3]
 
     pos = 0
     long_diff = []
@@ -42,15 +40,25 @@ def backtest(args,is_fitting = True):
 
     detail = {}
     detail['date'] = []
+    detail['slope'] = []
+    detail['grad'] = []
+    detail['min_diff'] = []
+    detail['max_diff'] = []
     detail['pos_price'] = []
     detail['direction'] = []
     detail['offset'] = []
+    detail['diff'] = []
 
 
     for row in tqdm(data.iterrows()):
         sign = row[1]['sign']   
+        if row[1]['min_diff']>=4:
+            sign *= -1
+
         # if row[0].time() != END_0 and row[0].time() != END_1:
-        if True:
+        tick_date =  datetime.fromtimestamp(row[1]['datatime'].timestamp()) - timedelta(hours=8)
+        tick_time = tick_date.time()
+        if tick_time != time(20,59) and tick_time != time(8,59):
             if pos == 0:
                 if sign == 1:
                     pos = 1
@@ -58,21 +66,30 @@ def backtest(args,is_fitting = True):
                     max_price = pos_price
                     min_price = pos_price
                     if not is_fitting:
-                        detail['date'].append(row[0])
+                        detail['date'].append(row[1]['date'])
                         detail['pos_price'].append(pos_price)
+                        detail['slope'].append(row[1]['slope'])
+                        detail['grad'].append(row[1]['grad'])
+                        detail['max_diff'].append(row[1]['max_diff'])
+                        detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(1)
                         detail['offset'].append('open')
-
+                        detail['diff'].append(0)
                 elif sign == -1:
                     pos = -1
                     pos_price = row[1]['bid_price']
                     min_price = pos_price
                     max_price = pos_price
                     if not is_fitting:
-                        detail['date'].append(row[0])
+                        detail['date'].append(row[1]['date'])
                         detail['pos_price'].append(pos_price)
+                        detail['slope'].append(row[1]['slope'])
+                        detail['grad'].append(row[1]['grad'])
+                        detail['max_diff'].append(row[1]['max_diff'])
+                        detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(-1)
                         detail['offset'].append('open')
+                        detail['diff'].append(0)
                 continue
 
             elif pos == 1:
@@ -84,7 +101,7 @@ def backtest(args,is_fitting = True):
 
                 diff_0 = row[1]['bid_price'] - pos_price
                 
-                if close_drop >= benifit:
+                if close_drop >= l_benifit:
                     long_diff.append(diff_0)
                     pos = 0
                     total_diff.append(diff_0)
@@ -92,10 +109,15 @@ def backtest(args,is_fitting = True):
                     changed.append(diff_0)
 
                     if not is_fitting:
-                        detail['date'].append(row[0])
+                        detail['date'].append(row[1]['date'])
                         detail['pos_price'].append(row[1]['bid_price'])
+                        detail['slope'].append(row[1]['slope'])
+                        detail['grad'].append(row[1]['grad'])
+                        detail['max_diff'].append(row[1]['max_diff'])
+                        detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(-1)
                         detail['offset'].append('close')
+                        detail['diff'].append(diff_0)
                 continue
 
             elif pos == -1:
@@ -106,7 +128,7 @@ def backtest(args,is_fitting = True):
             
                 diff_0 =  pos_price - row[1]['ask_price']
 
-                if close_drop >= benifit:
+                if close_drop >= s_benifit:
                     short_diff.append(diff_0)
                     pos = 0
                     total_diff.append(diff_0)
@@ -114,16 +136,21 @@ def backtest(args,is_fitting = True):
                     changed.append(-1*diff_0)
 
                     if not is_fitting:
-                        detail['date'].append(row[0])
+                        detail['date'].append(row[1]['date'])
                         detail['pos_price'].append(row[1]['ask_price'])
+                        detail['slope'].append(row[1]['slope'])
+                        detail['grad'].append(row[1]['grad'])
+                        detail['max_diff'].append(row[1]['max_diff'])
+                        detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(1)
                         detail['offset'].append('close')
+                        detail['diff'].append(diff_0)
                 continue
 
     if is_fitting == True:
         res = {"long_diff":sum(long_diff),"long_trades":len(long_diff),
                 "short_diff":sum(short_diff),"short_trades":len(short_diff)}
-        result.append({f"{benifit}":res})
+        result.append({f"{l_benifit}_{s_benifit}":res})
     else:
         base_name = os.path.basename(__file__).split('.')[0]
         file_name = RES_PATH + base_name +f'-backtest_result.csv'
@@ -194,7 +221,7 @@ def multi_backtest(input_path,data,worker_num =2,**config):
     result = manager.list()
     
     config_list = set_param(**config)
-    param =[(data,result,i) for i in config_list]
+    param =[(data,result,i[0],i[1]) for i in config_list]
     pool = Pool(worker_num)
     pool.map(backtest, param)
     pool.close()
@@ -203,10 +230,15 @@ def multi_backtest(input_path,data,worker_num =2,**config):
 
 def set_param(**configs):
     print(configs)
-    benifit = configs['benifit']
+    l_benifit = configs['l_benifit']
+    s_benifit = configs['s_benifit']
 
-    benifit_list = list(range(benifit[0],benifit[1],benifit[2]))
-    config_list = benifit_list
+    l_benifit_list = list(range(l_benifit[0],l_benifit[1],l_benifit[2]))
+    s_benifit_list = list(range(s_benifit[0],s_benifit[1],s_benifit[2]))
+    config_list = []
+    for i in l_benifit_list:
+        for j in s_benifit_list:
+            config_list.append([i,j])
     return config_list
 
 
@@ -220,34 +252,22 @@ def get_diff(x):
     else:
         return x[1]
 #下单逻辑在这里改
-def cal_sign(data):
-    
-    p0 = 60
-    p1 = 240
+def get_data(path,start=20000,end=50000,period=1):
+    data = pd.read_csv(path)
+    data['datatime'] = pd.to_datetime(data['datatime'])
+    data['max_diff'] = data['last_price'] - data['min']
+    data['min_diff'] = data['last_price'] - data['max']
 
-    roll_0 = data['last_price'].rolling(p0)
-    roll_1 = data['last_price'].rolling(p1)
-
-    max0 = roll_0.max()
-    min0 = roll_0.min()
-
-    max1 = roll_1.max()
-    min1 = roll_1.min()
-
-    data['min0_diff'] = data['last_price'] - max0
-    data['max0_diff'] = data['last_price'] - min0
-
-    data['min1_diff'] = data['last_price'] - max1 
-    data['max1_diff'] = data['last_price'] - min1
-
-    data['diff0']= data[['min0_diff','max0_diff']].apply(get_diff,axis=1)
-    data['diff1']= data[['min1_diff','max1_diff']].apply(get_diff,axis=1)
-
-    h1 = data[(data['last_price']<=data['bid_price'])&(data['diff0']<=2)&(data['bid_volume']>7.5*data['ask_volume'])].index
-    l1 =  data[(data['last_price']>=data['ask_price'])&(data['diff0']>=-2)&(data['ask_volume']>7.5*data['bid_volume'])].index
+    h1 = data[(data['last_price']<=data['bid_price'])&(data['bid_volume']>5*data['ask_volume'])&(data['slope']>0)].index
+    l1 =  data[(data['ask_volume']>5*data['bid_volume'])&(data['slope']<0)&(data['grad']>0)].index
     data['sign']=0
     data.loc[h1,'sign'] = 1
     data.loc[l1,'sign'] = -1
+
+    return data[start:end]
+
+
+    
     return data
 
 if __name__ == "__main__":
@@ -255,13 +275,13 @@ if __name__ == "__main__":
         参数顺序data,result,benifit,loss
     """
     is_fitting = False
-    input_path = "D:/Code/jupyter_project/data_analysis/tick_analysis/tick_backtest_2/data/rb2405_tick.csv"
-    start = 400000
-    end = 800000
+    input_path = "D:/Code/jupyter_project/data_analysis/bar_analysis/bar_backtest/rb数据分析/rb2405_tick_new.csv"
+    start = 0
+    end = 1000000
     data = get_data(input_path,start=start,end=end,period=10)
-    data = cal_sign(data)
     config = {
-        "benifit":[4,24,2],
+        "l_benifit":[10,24,2],
+        "s_benifit":[8,20,2]
     }
 
     if is_fitting:
@@ -269,5 +289,5 @@ if __name__ == "__main__":
     else:
         param = read_best_parm()
         result = {}
-        args = (data,result,param[0])
+        args = (data,result,param[0],param[1])
         backtest(args=args,is_fitting=is_fitting )
