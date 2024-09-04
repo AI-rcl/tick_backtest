@@ -42,6 +42,7 @@ def backtest(args,is_fitting = True):
     detail['date'] = []
     detail['slope'] = []
     detail['grad'] = []
+    detail['atr'] = []
     detail['min_diff'] = []
     detail['max_diff'] = []
     detail['pos_price'] = []
@@ -51,15 +52,25 @@ def backtest(args,is_fitting = True):
 
 
     for row in tqdm(data.iterrows()):
+        changed_sign = False
         sign = row[1]['sign']   
-        if row[1]['min_diff']>=4:
-            sign *= -1
-
+        
         # if row[0].time() != END_0 and row[0].time() != END_1:
         tick_date =  datetime.fromtimestamp(row[1]['datatime'].timestamp()) - timedelta(hours=8)
         tick_time = tick_date.time()
         if tick_time != time(20,59) and tick_time != time(8,59):
             if pos == 0:
+                if row[1]['min_diff']>=4:
+                    sign *= -1
+                    changed_sign = True
+                elif len(total_diff)>=3:
+                    if total_diff[-1] <0 and total_diff[-2]<0 and total_diff[-3]<0:
+                        sign *= -1
+                        changed_sign = True
+                    elif sum(total_diff[-2:]) < -32:
+                        sign *= -1
+                        changed_sign = True
+        
                 if sign == 1:
                     pos = 1
                     pos_price = row[1]['ask_price']
@@ -70,11 +81,14 @@ def backtest(args,is_fitting = True):
                         detail['pos_price'].append(pos_price)
                         detail['slope'].append(row[1]['slope'])
                         detail['grad'].append(row[1]['grad'])
+                        detail['atr'].append(row[1]['atr'])
                         detail['max_diff'].append(row[1]['max_diff'])
                         detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(1)
                         detail['offset'].append('open')
                         detail['diff'].append(0)
+                    if changed_sign:
+                        print(row[1]['date'])
                 elif sign == -1:
                     pos = -1
                     pos_price = row[1]['bid_price']
@@ -85,11 +99,14 @@ def backtest(args,is_fitting = True):
                         detail['pos_price'].append(pos_price)
                         detail['slope'].append(row[1]['slope'])
                         detail['grad'].append(row[1]['grad'])
+                        detail['atr'].append(row[1]['atr'])
                         detail['max_diff'].append(row[1]['max_diff'])
                         detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(-1)
                         detail['offset'].append('open')
                         detail['diff'].append(0)
+                    if changed_sign:
+                        print(row[1]['date'])
                 continue
 
             elif pos == 1:
@@ -113,6 +130,7 @@ def backtest(args,is_fitting = True):
                         detail['pos_price'].append(row[1]['bid_price'])
                         detail['slope'].append(row[1]['slope'])
                         detail['grad'].append(row[1]['grad'])
+                        detail['atr'].append(row[1]['atr'])
                         detail['max_diff'].append(row[1]['max_diff'])
                         detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(-1)
@@ -140,6 +158,7 @@ def backtest(args,is_fitting = True):
                         detail['pos_price'].append(row[1]['ask_price'])
                         detail['slope'].append(row[1]['slope'])
                         detail['grad'].append(row[1]['grad'])
+                        detail['atr'].append(row[1]['atr'])
                         detail['max_diff'].append(row[1]['max_diff'])
                         detail['min_diff'].append(row[1]['min_diff'])
                         detail['direction'].append(1)
@@ -258,7 +277,7 @@ def get_data(path,start=20000,end=50000,period=1):
     data['max_diff'] = data['last_price'] - data['min']
     data['min_diff'] = data['last_price'] - data['max']
 
-    h1 = data[(data['last_price']<=data['bid_price'])&(data['bid_volume']>5*data['ask_volume'])&(data['slope']>0)].index
+    h1 = data[(data['last_price']<=data['bid_price'])&(data['bid_volume']>4*data['ask_volume'])&(data['slope']>0)].index
     l1 =  data[(data['ask_volume']>5*data['bid_volume'])&(data['slope']<0)&(data['grad']>0)].index
     data['sign']=0
     data.loc[h1,'sign'] = 1
@@ -266,9 +285,6 @@ def get_data(path,start=20000,end=50000,period=1):
 
     return data[start:end]
 
-
-    
-    return data
 
 if __name__ == "__main__":
     """
@@ -280,8 +296,8 @@ if __name__ == "__main__":
     end = 1000000
     data = get_data(input_path,start=start,end=end,period=10)
     config = {
-        "l_benifit":[10,24,2],
-        "s_benifit":[8,20,2]
+        "l_benifit":[16,19,1],
+        "s_benifit":[16,19,1]
     }
 
     if is_fitting:
